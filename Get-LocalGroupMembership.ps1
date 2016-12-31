@@ -1,4 +1,4 @@
-﻿Function Get-LocalGroupMembership {
+Function Get-LocalGroupMembership {
     <#
         .SYNOPSIS
             Recursively list all members of a specified Local group.
@@ -147,43 +147,46 @@
                     [System.DirectoryServices.DirectoryEntry]$LocalGroup
                 )
                 # Invoke the Members method and convert to an array of member objects.
-                #Change3 comment from web page by Craig Dempsey to fixe Powershell 5.0 issue
-				#$Members= @($LocalGroup.psbase.Invoke("Members"))
-                $Members= @($LocalGroup.psbase.Invoke("Members")) | foreach{([System.DirectoryServices.DirectoryEntry]$_)}
-				$Counter++
+                $Members= @($LocalGroup.psbase.Invoke("Members"))
+                $Counter++
                 ForEach ($Member In $Members) {                
                     Try {
-						#Change3
-                        #$Name = $Member.GetType().InvokeMember("Name", 'GetProperty', $Null, $Member, $Null)
-                        #$Path = $Member.GetType().InvokeMember("ADsPath", 'GetProperty', $Null, $Member, $Null)
-                        $Name = $Member.InvokeGet("Name")
-						$Path = $Member.InvokeGet("AdsPath")
-
-						# Check if this member is a group.
-                        #Change3
-						#$isGroup = ($Member.GetType().InvokeMember("Class", 'GetProperty', $Null, $Member, $Null) -eq "group")
-                        $isGroup = ($Member.InvokeGet("Class") -eq "group")
-
-						#region Change1 by Kensel
-						#Remove the domain from the computername to fix the type comparison when supplied with FQDN
-						IF ($Computer.Contains('.')){
-							$Computer = $computer.Substring(0,$computer.IndexOf('.'))
-						}
-						#endregion Change1 by Kensel
-
-						If (($Path -like "*/$Computer/*")) {
+                        $Name = $Member.GetType().InvokeMember("name", 'GetProperty', $Null, $Member, $Null)
+                        $Path = $Member.GetType().InvokeMember("ADsPath", 'GetProperty', $Null, $Member, $Null)
+                        # Check if this member is a group.
+                        $isGroup = ($Member.GetType().InvokeMember("Class", 'GetProperty', $Null, $Member, $Null) -eq "group")
+                        If (($Path -like "*/$Computer/*")) {
                             $Type = 'Local'
                         } Else {$Type = 'Domain'}
-						#Change2 by Kensel - Add the Group to the output
-                        New-Object PSObject -Property @{
-                            Computername = $Computer
-                            Name = $Name
-                            Type = $Type
-                            ParentGroup = $LocalGroup.Name[0]
-                            isGroup = $isGroup
-                            Depth = $Counter
-							Group = $Group
-                        }
+                     
+                        
+			##################################################################################
+			###
+			### Was having issues with the CSV export so I changed up the object a little bit.
+			### Also had to add these here so I could export to a CSV file
+			###
+			##################################################################################
+			# New-Object PSObject -Property @{
+                        New-Object PSOBject |
+                            Add-Member -Type NoteProperty -name "Name" -value $Name -PassThru|
+                            Add-Member -Type NoteProperty -name "Depth" -Value $Counter -PassThru |
+                            Add-Member -Type NoteProperty -name "ParentGroup" -Value $LocalGroup.Name[0] -PassThru |
+                            Add-Member -Type NoteProperty -name "Type" -Value $Type -PassThru |
+                            Add-Member -Type NoteProperty -name "ComputerName" -value $Computer -PassThru |                           
+                            Add-Member -Type NoteProperty -name "isGroup" -Value $isGroup -PassThru |                            
+                            Add-Member -Type NoteProperty -name "UPN" -Value $MemberGroup.UserPrincipalName -PassThru |
+                            Add-Member -Type NoteProperty -name "Distinguished Name" -Value $MemberGroup.DistinguishedName -PassThru |
+                            Add-Member -Type NoteProperty -name "Account Status" -Value $MemberGroup.userAccountControl
+                            ### Remnants of the old object
+			    #Computername = $Computer
+                            #Type = $Type
+                            #ParentGroup = $LocalGroup.Name[0]
+                            #isGroup = $isGroup
+                            #Depth = $Counter
+                            #UPN = $MemberGroup.UserPrincipalName
+                            #DistinguishedName = $MemberGroup.distinguishedName
+
+                        #}
                         If ($isGroup) {
                             # Check if this group is local or domain.
                             #$host.ui.WriteVerboseLine("(RS)Checking if Counter: {0} is less than Depth: {1}" -f $Counter, $Depth)
@@ -234,15 +237,34 @@
                     $Counter++   
                     ForEach ($MemberDN In $ADGroup.Member) {
                         $MemberGroup = [ADSI]("LDAP://{0}" -f ($MemberDN -replace '/','\/'))
-                        #Change2 by Kensel - Add the Group to the output
-						New-Object PSObject -Property @{
+                        
+                        New-Object PSObject -Property @{
+                            ##################################################################################
+                            ###
+                            ### Added in some additional ADSI attributes
+                            ### These values below are displayed in the console, but not when exported csv
+                            ###
+                            ##################################################################################                            
+                            
+                            ### The numeric codes returned by this attribute correspond to account
+			    ### statuses as labeled below.
+			    UAC = switch ($MemberGroup.userAccountControl[0]) 
+                            {
+                                512 {"Enabled"}
+                                514 {"Disabled"}
+                                66048 {"Enabled, password never expires"}
+                                66050 {"Disabled, password never expires"}
+                                default {"N/A"}
+                            }
                             Computername = $Computer
-                            Name = $MemberGroup.name[0]
+                            UPN = $MemberGroup.UserPrincipalName[0]
+                            Name = $MemberGroup.Name[0]
+                            DistinguishedName = $MemberGroup.distinguishedName[0]
                             Type = 'Domain'
                             ParentGroup = $NTName
                             isGroup = ($MemberGroup.Class -eq "group")
                             Depth = $Counter
-							Group = $Group
+                            
                         }
                         # Check if this member is a group.
                         If ($MemberGroup.Class -eq "group") {              
